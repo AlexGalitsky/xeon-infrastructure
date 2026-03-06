@@ -1,0 +1,37 @@
+# Игнорируем абсолютно всё
+*
+
+# Разрешаем структуру папок (только на 3 уровня вглубь)
+!*/
+!/*/*/
+
+# Разрешаем только конфиги
+!**/.env.example
+!**/*.yml
+!**/*.yaml
+!**/*.conf
+!**/*.sh
+!**/*.ini
+!**/*.json
+!**/Dockerfile
+!.gitignore
+
+# --- ЖЕСТКИЕ ИСКЛЮЧЕНИЯ (Черный список данных) ---
+# Запрещаем Git заходить в папки с данными, даже если там есть .json или .conf
+**/data/**
+**/pgdata/**
+**/redis_data/**
+**/logs/**
+**/backups/**
+**/gitlab/*/**
+**/jenkins/*/**
+**/xui/**
+lost+found/
+apps/qbittorrent/downloads/
+apps/qbittorrent/config/
+
+# Если docker-compose лежат внутри папок gitlab/jenkins, 
+# то вышеуказанные запреты их скроют. 
+# В таком случае добавим исключения для самих файлов:
+!**/docker-compose.yml
+

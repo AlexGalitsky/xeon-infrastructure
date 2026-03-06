@@ -1,0 +1,69 @@
+services:
+  # --- БАЗЫ ДАННЫХ ---
+  db-postgres:
+    image: postgres:16-alpine
+    container_name: water-db
+    environment:
+      POSTGRES_PASSWORD: password
+    volumes:
+      - ./postgres:/var/lib/postgresql/data
+    networks:
+      - web
+
+  db-redis:
+    image: redis:7-alpine
+    container_name: water-redis
+    networks:
+      - web
+
+  # --- API GATEWAY (RUST) ---
+  api-gateway:
+    build: ./rust-gateway
+    container_name: water-gateway
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.water-api.rule=Host(`api.water.local`)"
+      - "traefik.http.services.water-api.loadbalancer.server.port=8080"
+    depends_on:
+      - db-redis
+    networks:
+      - web
+
+  # --- BACKEND (LARAVEL) ---
+  laravel-app:
+    build: ./laravel-app
+    container_name: water-backend
+    environment:
+      DB_HOST: db-postgres
+      REDIS_HOST: db-redis
+    networks:
+      - web
+
+  # --- MICROSERVICES ---
+  nest-chats:
+    image: node:20-alpine
+    container_name: water-chats
+    networks:
+      - web
+
+  python-bot:
+    build: ./python-bot
+    container_name: water-bot
+    networks:
+      - web
+
+  # --- FRONTEND (NUXT SSG) ---
+  nuxt-frontend:
+    image: nginx:alpine
+    container_name: water-frontend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.water-web.rule=Host(`water.local`)"
+    volumes:
+      - ./nuxt-web/dist:/usr/share/nginx/html
+    networks:
+      - web
+
+networks:
+  web:
+    external: true
