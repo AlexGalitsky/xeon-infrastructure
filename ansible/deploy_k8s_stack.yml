@@ -33,25 +33,33 @@
           - ca-certificates
           - python3
           - python3-pip
+          - python3-kubernetes
         state: present
         update_cache: yes
         cache_valid_time: 3600  # Обновлять кэш только если старше 1 часа
 
-    - name: Install Python Kubernetes client
-      pip:
-        name: kubernetes
-        state: present
+    - name: Create ext4 filesystem on disks
+      filesystem:
+        fstype: ext4
+        dev: "{{ item.dev }}"
+        force: yes # Это заставит Ansible переформатировать XFS в EXT4
+      loop:
+        - { dev: '/dev/mapper/ubuntu--vg-lv_longhorn' }
+        - { dev: '/dev/sdb' }
+        - { dev: '/dev/sdc' }
+        - { dev: '/dev/sda' }
 
-    - name: Prepare Longhorn directories on disks
-      file:
-        path: "{{ item }}"
-        state: directory
-        mode: '0755'
-      with_items:
-        - /mnt/nvme_storage
-        - /mnt/ssd_storage
-        - /mnt/hdd_fast
-        - /mnt/hdd_slow
+    - name: Mount storage for Longhorn
+      mount:
+        path: "{{ item.path }}"
+        src: "{{ item.src }}"
+        fstype: ext4
+        state: mounted
+      loop:
+        - { path: '/mnt/nvme_storage', src: '/dev/mapper/ubuntu--vg-lv_longhorn' }
+        - { path: '/mnt/ssd_storage',  src: '/dev/sdb' }
+        - { path: '/mnt/hdd_fast',     src: '/dev/sdc' }
+        - { path: '/mnt/hdd_slow',     src: '/dev/sda' }
 
     - name: Install RKE2
       shell: |
