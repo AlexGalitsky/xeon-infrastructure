@@ -6,6 +6,9 @@
     rke2_version: v1.30.2+rke2r1
     kubeconfig_path: "/home/{{ ansible_user }}/.kube"
     helm_version: "v4.1.1"
+    # Прокси для загрузки через Xray, т.к. РКН
+    http_proxy: http://127.0.0.1:10808
+    https_proxy: http://127.0.0.1:10808
 
   tasks:
     - name: 1. Install System Dependencies (Longhorn & KubeVirt)
