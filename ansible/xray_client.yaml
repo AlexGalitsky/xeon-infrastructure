@@ -2,7 +2,7 @@
 - name: Deploy XRay client, hello rkn # ansible-playbook -i inventory.ini xray_client.yaml
   hosts: nodes
   vars_files:
-    - variables.yml
+    - variables.yaml
   become: true
   vars:
     xray_version: "v1.8.24"
@@ -36,6 +36,7 @@
         owner: xray
         group: xray
         mode: '0755'
+        recurse: yes
       loop:
         - /opt/xray
         - /opt/xray/configs
@@ -106,26 +107,28 @@
       uri:
         url: https://google.com
         method: GET
-        proxy_external: yes
+        status_code: 200
         use_proxy: yes
       environment:
         http_proxy: "http://127.0.0.1:10809"
         https_proxy: "http://127.0.0.1:10809"
       register: proxy_check
-      until: proxy_check.status == 200
-      retries: 5
+      retries: 10
       delay: 5
+      # Ждем, пока переменная перестанет быть 'failed' (ошибка соединения)
+      # И пока в ней не появится статус 200
+      until: "not proxy_check.failed and proxy_check.status | default(0) == 200"
       ignore_errors: yes
 
     - name: Verify proxy status
       debug:
-        msg: "Proxy is working! Google returned status 200."
-      when: proxy_check.status == 200
+        msg: "Proxy is working! Status: {{ proxy_check.status | default('N/A') }}"
+      when: not proxy_check.failed and proxy_check.status | default(0) == 200
 
-    - name: Warn if proxy is not working
+    - name: Fail if proxy is not working
       fail:
-        msg: "Proxy check failed! Check Xray logs with: journalctl -u xray -n 50"
-      when: proxy_check.status != 200
+        msg: "Proxy check failed! Check Xray logs. Error: {{ proxy_check.msg | default('Unknown error') }}"
+      when: proxy_check.failed or proxy_check.status | default(0) != 200
 
     - name: Display Xray Shadowsocks information
       debug:

@@ -1,6 +1,8 @@
 ---
 - name: Setup RKE2 Single Node
-  hosts: mainserver
+  hosts: nodes
+  vars_files:
+    - variables.yml
   become: yes
   vars:
     rke2_version: v1.30.2+rke2r1
