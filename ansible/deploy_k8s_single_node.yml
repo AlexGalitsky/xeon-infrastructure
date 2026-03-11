@@ -1,16 +1,17 @@
 ---
-- name: Setup RKE2 Single Node
+- name: Setup RKE2 Single Node # ansible-playbook -i inventory.ini deploy_k8s_single_node.yml --vault-password-file ~/.vault_pass -K
   hosts: nodes
   vars_files:
     - variables.yml
+    - secrets.yml
   become: yes
   vars:
     rke2_version: v1.30.2+rke2r1
     kubeconfig_path: "/home/{{ ansible_user }}/.kube"
     helm_version: "v4.1.1"
     # Прокси для загрузки через Xray, т.к. РКН
-    http_proxy: http://127.0.0.1:10808
-    https_proxy: http://127.0.0.1:10808
+    # http_proxy: http://127.0.0.1:10809
+    # https_proxy: http://127.0.0.1:10809
 
   tasks:
     - name: 1. Install System Dependencies (Longhorn & KubeVirt)
@@ -53,9 +54,11 @@
       changed_when: false
 
     - name: 5.1 Download and Run RKE2 installer
+      # curl -sfL https://get.rke2.io | sh -
+      # я прописал свой вместо этого урла, т.к. РКН забанил
       shell: |
         set -e
-        curl -sfL https://get.rke2.io | INSTALL_RKE2_VERSION={{ rke2_version }} sh -
+        curl -sfL https://goodwin.website/install_rke2.sh | INSTALL_RKE2_VERSION={{ rke2_version }} sh -
       # Запускаем только если rke2 не стоит ИЛИ версия в системе не совпадает с переменной
       when: rke2_version_check.rc != 0 or rke2_version not in rke2_version_check.stdout
       notify: Restart RKE2
