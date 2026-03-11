@@ -5,13 +5,11 @@
     - secrets.yml
   become: true
   vars:
-    domain: "goodwin.website"
     rancher_hostname: "rancher.{{ domain }}"
     
-    # Фиксированные версии для идемпотентности
     rke2_version: "v1.28.7+rke2r1"
-    kubevirt_version: "v1.1.0"  # Фиксированная стабильная версия
-    cdi_version: "v1.58.0"       # Фиксированная стабильная версия
+    kubevirt_version: "v1.1.0"
+    cdi_version: "v1.58.0"
     cert_manager_version: "v1.14.4"
     
     ansible_python_interpreter: /usr/bin/python3
