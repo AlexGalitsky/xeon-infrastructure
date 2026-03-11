@@ -29,8 +29,9 @@ ansible/variables.yaml
 **/jenkins/*/**
 **/xui/**
 lost+found/
-apps/qbittorrent/downloads/
-apps/qbittorrent/config/
+storage/lost+found/
+storage/apps/qbittorrent/downloads/
+storage/apps/qbittorrent/config/
 
 # Если docker-compose лежат внутри папок gitlab/jenkins, 
 # то вышеуказанные запреты их скроют. 
