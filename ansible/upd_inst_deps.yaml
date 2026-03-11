@@ -1,0 +1,25 @@
+---
+- name: Preinstall
+  hosts: nodes
+  become: true
+
+  tasks:
+    - name: Update system and install dependencies
+      apt:
+        name:
+          - curl
+          - open-iscsi
+          - nfs-common
+          - cryptsetup
+          - gnupg
+          - lsb-release
+          - ca-certificates
+          - python3
+          - python3-pip
+          - python3-kubernetes
+          - unzip
+          - iptables
+          - iproute2
+        state: present
+        update_cache: yes
+        cache_valid_time: 3600  # Обновлять кэш только если старше 1 часа

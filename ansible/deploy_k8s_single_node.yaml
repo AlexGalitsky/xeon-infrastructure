@@ -1,0 +1,123 @@
+---
+- name: Setup RKE2 Single Node
+  hosts: mainserver
+  become: yes
+  vars:
+    rke2_version: v1.30.2+rke2r1
+    kubeconfig_path: "/home/{{ ansible_user }}/.kube"
+    helm_version: "v4.1.1"
+
+  tasks:
+    - name: 1. Install System Dependencies (Longhorn & KubeVirt)
+      apt:
+        name: [curl, open-iscsi, nfs-common, bridge-utils, qemu-kvm, libvirt-daemon-system]
+        state: present
+        update_cache: yes
+
+    - name: 2. Ensure iSCSI is running (Required for Longhorn)
+      systemd:
+        name: iscsid
+        enabled: yes
+        state: started
+
+    - name: 3. Create RKE2 Config Directory
+      file:
+        path: /etc/rancher/rke2
+        state: directory
+        mode: '0755'
+
+    - name: 4. Configure RKE2 (Single Node Mode)
+      copy:
+        dest: /etc/rancher/rke2/config.yaml
+        content: |
+          write-kubeconfig-mode: "0644"
+          cni: canal
+          token: "{{ rke2_token }}"
+          tls-san:
+            - "{{ ansible_host }}"
+            - "{{ domain }}"
+          disable:
+            - rke2-ingress-nginx # поставить свой позже
+        mode: '0600'
+      notify: Restart RKE2
+
+    - name: 5. Check current RKE2 version
+      command: rke2 --version
+      register: rke2_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: 5.1 Download and Run RKE2 installer
+      shell: |
+        set -e
+        curl -sfL https://get.rke2.io | INSTALL_RKE2_VERSION={{ rke2_version }} sh -
+      # Запускаем только если rke2 не стоит ИЛИ версия в системе не совпадает с переменной
+      when: rke2_version_check.rc != 0 or rke2_version not in rke2_version_check.stdout
+      notify: Restart RKE2
+
+    - name: 5.2 Verify RKE2 binary version (Optional)
+      command: /usr/local/bin/rke2 --version
+      register: rke2_check
+      changed_when: false
+
+    - name: 6. Enable and Start RKE2
+      systemd:
+        name: rke2-server
+        enabled: yes
+        state: "started"
+
+    - name: 6.1 Wait for rke2.yaml to be created
+      wait_for:
+        path: /etc/rancher/rke2/rke2.yaml
+        state: present
+        timeout: 300
+
+    - name: 6.2 Wait for K8s API to be ready
+      command: >
+        /var/lib/rancher/rke2/bin/kubectl 
+        --kubeconfig /etc/rancher/rke2/rke2.yaml 
+        get nodes
+      register: api_check
+      until: api_check.rc == 0
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: 7. Setup Kubectl directory
+      file:
+        path: "{{ kubeconfig_path }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user }}" # Передаем права пользователю
+        group: "{{ ansible_user }}"
+
+    - name: 8. Copy RKE2 config to user home
+      copy:
+        src: /etc/rancher/rke2/rke2.yaml
+        dest: "{{ kubeconfig_path }}/config"
+        remote_src: yes # Копируем прямо на сервере (с файла на файл)
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0600' # только для владельца
+
+    - name: 9. Add Helm GPG key
+      apt_key:
+        url: "https://baltocdn.com/helm/signing.asc"
+        state: present
+
+    - name: 9.1. Add Helm APT repository
+      apt_repository:
+        repo: "deb https://baltocdn.com/helm/stable/debian/ all main"
+        state: present
+
+    - name: 9.2. Install Helm
+      apt:
+        name: helm
+        state: present
+        update_cache: yes
+
+  handlers:
+    - name: Restart RKE2
+      systemd:
+        name: rke2-server
+        state: restarted

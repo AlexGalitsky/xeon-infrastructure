@@ -1,0 +1,38 @@
+[Unit]
+Description=Xray Service
+Documentation=https://github.com
+After=network.target nss-lookup.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=xray
+Group=xray
+# Путь к бинарнику и конфигу
+ExecStart=/opt/xray/xray run -config /opt/xray/configs/config.json
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10
+
+# Лимиты для работы с большим количеством соединений
+LimitNOFILE=1000000
+LimitNPROC=1000000
+
+# --- Настройки безопасности (Sandboxing) ---
+# Запрещает процессу получать новые привилегии (например, через sudo)
+NoNewPrivileges=yes
+# Изолирует /tmp от основной системы
+PrivateTmp=yes
+# Запрещает доступ к домашним директориям пользователей
+ProtectHome=yes
+# Делает /usr, /boot и /etc доступными только для чтения для сервиса
+ProtectSystem=full
+# Запрещает доступ к устройствам (типа /dev/sda)
+DeviceAllow=/dev/null rewrite
+DevicePolicy=closed
+# Ограничивает доступ к системным вызовам (только самое необходимое)
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,149 @@
+---
+- name: Deploy XRay client, hello rkn # ansible-playbook -i inventory.ini xray_client.yaml
+  hosts: nodes
+  vars_files:
+    - variables.yml
+  become: true
+  vars:
+    xray_version: "v1.8.24"
+
+  tasks:
+    - name: Update system and install dependencies
+      apt:
+        name:
+          - curl
+          - ca-certificates
+          - unzip
+          - iptables
+          - iproute2
+        state: present
+        update_cache: yes
+        cache_valid_time: 3600  # Обновлять кэш только если старше 1 часа
+
+    # ----- Установка и настройка Xray-core (Shadowsocks клиент) -----
+    - name: Create xray user
+      user:
+        name: xray
+        system: yes
+        shell: /usr/sbin/nologin
+        create_home: no
+        home: /nonexistent
+
+    - name: Create Xray directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: xray
+        group: xray
+        mode: '0755'
+      loop:
+        - /opt/xray
+        - /opt/xray/configs
+        - /var/log/xray
+        - /opt/xray/tools
+
+    - name: Download and install Xray-core
+      unarchive:
+        src: "https://github.com/XTLS/Xray-core/releases/download/{{ xray_version }}/Xray-linux-64.zip"
+        dest: /opt/xray/
+        remote_src: yes
+        owner: root  # Бинарники лучше держать под root
+        group: root
+        mode: '0755'
+        creates: /opt/xray/xray
+      register: xray_download
+
+    - name: Deploy Xray config
+      template:
+        src: xray_config.json.j2
+        dest: /opt/xray/configs/config.json
+        owner: xray
+        group: xray
+        mode: '0644'
+        validate: "/opt/xray/xray -test -config %s" # Проверит синтаксис перед заменой!
+      notify: restart xray
+          
+    - name: Create systemd service for Xray
+      template:
+        src: xray.service.j2
+        dest: /etc/systemd/system/xray.service
+      notify: 
+        - reload systemd
+        - restart xray
+
+    - name: Ensure Xray is enabled and running
+      systemd:
+        name: xray
+        enabled: yes
+        state: started
+
+    - name: Wait for Xray to be ready
+      wait_for:
+        port: 10808
+        host: 127.0.0.1
+        timeout: 30
+
+    - name: Configure APT to use proxy
+      copy:
+        dest: /etc/apt/apt.conf.d/01proxy
+        content: |
+          Acquire::http::Proxy "http://127.0.0.1:10809";
+          Acquire::https::Proxy "http://127.0.0.1:10809";
+          # Если прокси недоступен, APT подождет 2 секунды и пойдет напрямую (опционально)
+          Acquire::Retries "0";
+
+    - name: Configure system-wide proxy
+      copy:
+        dest: /etc/profile.d/proxy.sh
+        content: |
+          export http_proxy="http://127.0.0.1:10809"
+          export https_proxy="http://127.0.0.1:10809"
+          export HTTP_PROXY="http://127.0.0.1:10809"
+          export HTTPS_PROXY="http://127.0.0.1:10809"
+          export no_proxy="localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.local"
+
+    - name: Check if proxy is working
+      uri:
+        url: https://google.com
+        method: GET
+        proxy_external: yes
+        use_proxy: yes
+      environment:
+        http_proxy: "http://127.0.0.1:10809"
+        https_proxy: "http://127.0.0.1:10809"
+      register: proxy_check
+      until: proxy_check.status == 200
+      retries: 5
+      delay: 5
+      ignore_errors: yes
+
+    - name: Verify proxy status
+      debug:
+        msg: "Proxy is working! Google returned status 200."
+      when: proxy_check.status == 200
+
+    - name: Warn if proxy is not working
+      fail:
+        msg: "Proxy check failed! Check Xray logs with: journalctl -u xray -n 50"
+      when: proxy_check.status != 200
+
+    - name: Display Xray Shadowsocks information
+      debug:
+        msg:
+          - "Xray SOCKS5 proxy: 127.0.0.1:10808"
+          - "Xray HTTP proxy: 127.0.0.1:10809"
+          - "Shadowsocks Server: {{ xray_server_address }}:{{ xray_server_port }}"
+          - "Encryption Method: {{ xray_method }}"
+          - "Password: ###################################"
+          - "Plugin: {{ xray_plugin }} with options: {{ xray_plugin_opts }}"
+      run_once: true
+
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: restart xray
+      systemd:
+        name: xray
+        state: restarted

@@ -1,0 +1,78 @@
+---
+- name: Managed Xeon Infrastructure
+  hosts: nodes
+  become: yes
+  vars:
+    ansible_user: "goodwin"
+    storage_dev: "/dev/sda1"  # Указываем конкретный раздел
+    storage_path: "/mnt/storage"
+    swap_size: "16G"
+
+  tasks:
+    - name: 1. System | Update and Install Base Soft
+      apt:
+        name: [curl, git, htop, ufw, qemu-kvm, libvirt-daemon-system, cockpit, cockpit-machines, python3-pip, python3-debian]
+        update_cache: yes
+        state: present
+
+    - name: 2. Storage | Get UUID for Storage Disk
+      command: blkid -s UUID -o value {{ storage_dev }}
+      register: storage_uuid
+      changed_when: false
+
+    - name: 3. Storage | Create Filesystem (Only if NOT mounted)
+      filesystem:
+        fstype: ext4
+        dev: "{{ storage_dev }}"
+      when: disk_mounted.rc != 0
+
+    - name: 4. Storage | Mount by UUID (Safe)
+      mount:
+        path: "{{ storage_path }}"
+        src: "UUID={{ storage_uuid.stdout }}"
+        fstype: ext4
+        state: mounted
+
+    - name: 5. Swap | Create Swapfile
+      command: |
+        sh -c "fallocate -l {{ swap_size }} /swapfile && 
+        chmod 600 /swapfile && 
+        mkswap /swapfile && 
+        swapon /swapfile"
+      args:
+        creates: /swapfile
+
+    - name: 6. Docker | Install via Official Script
+      shell: curl -fsSL https://docker.com | sh
+      args:
+        creates: /usr/bin/docker
+
+    - name: 7. Structure | Create Folders (IaC Style)
+      file:
+        path: "{{ storage_path }}/{{ item }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: docker
+        mode: '0755'
+      loop:
+        - infra/traefik/data
+        - infra/gitlab
+        - infra/jenkins
+        - infra/portainer
+        - projects/common
+        - projects/water-delivery
+        - apps/qbittorrent
+        - backups
+
+    - name: 8. System | Optimize Sysctl
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+      loop:
+        - { name: 'vm.swappiness', value: '10' }
+        - { name: 'fs.file-max', value: '2097152' }
+
+    - name: 9. Docker | Create External Network
+      docker_network:
+        name: web
+        state: present

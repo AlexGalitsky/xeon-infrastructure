@@ -1,0 +1,41 @@
+services:
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    restart: always
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Moscow
+      - WEBUI_PORT=8001
+    volumes:
+      - ./config:/config
+      - ./downloads:/downloads
+    networks:
+      - web
+    ports:
+      - "6881:6881"
+      - "6881:6881/udp"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.qb.rule=Host(`${DOMAIN_QB}`)"
+      - "traefik.http.routers.qb.entrypoints=websecure"
+      - "traefik.http.routers.qb.tls.certresolver=myresolver"
+      - "traefik.http.services.qb.loadbalancer.server.port=8001"
+
+  samba:
+    image: dperson/samba
+    container_name: samba
+    restart: always
+    ports:
+      - "139:139"
+      - "445:445"
+    volumes:
+      - ./downloads:/mnt/downloads
+    command: -u "${ADMIN_USER};${ADMIN_PASSWORD}" -s "Torrents;/mnt/downloads;yes;no;no;${ADMIN_USER}"
+    environment:
+      - TZ=Europe/Moscow
+
+networks:
+  web:
+    external: true

@@ -1,9 +1,0 @@
-services:
-  x-ui:
-    image: ghcr.io/mhsanaei/3x-ui:latest  # Это основной актуальный образ
-    container_name: 3x-ui
-    volumes:
-      - /etc/x-ui:/etc/x-ui
-    network_mode: host
-    restart: always
-
