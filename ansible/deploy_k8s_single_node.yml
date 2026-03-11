@@ -8,10 +8,13 @@
   vars:
     rke2_version: v1.30.2+rke2r1
     kubeconfig_path: "/home/{{ ansible_user }}/.kube"
-    helm_version: "v4.1.1"
+    helm_version: "v3.20.0"
     # Прокси для загрузки через Xray, т.к. РКН
-    # http_proxy: http://127.0.0.1:10809
-    # https_proxy: http://127.0.0.1:10809
+    # http_proxy_url: http://127.0.0.1:10809
+    # https_proxy_url: http://127.0.0.1:10809
+  environment:
+    http_proxy: "{{ http_proxy_url | default('') }}"
+    https_proxy: "{{ https_proxy_url | default('') }}"
 
   tasks:
     - name: 1. Install System Dependencies (Longhorn & KubeVirt)
@@ -106,17 +109,19 @@
         group: "{{ ansible_user }}"
         mode: '0600' # только для владельца
 
-    - name: 9. Add Helm GPG key
-      apt_key:
-        url: "https://baltocdn.com/helm/signing.asc"
-        state: present
+    - name: 9.1. Download and dearmor Helm GPG key
+      # используем shell, так как ключ нужно преобразовать в формат gpg
+      shell: "curl -fsSL https://packages.buildkite.com/helm-linux/helm-debian/gpgkey | gpg --dearmor -o /usr/share/keyrings/helm.gpg"
+      args:
+        creates: /usr/share/keyrings/helm.gpg
 
-    - name: 9.1. Add Helm APT repository
+    - name: 9.2. Add Helm repo
       apt_repository:
-        repo: "deb https://baltocdn.com/helm/stable/debian/ all main"
+        repo: "deb [signed-by=/usr/share/keyrings/helm.gpg] https://packages.buildkite.com/helm-linux/helm-debian/any/ any main"
         state: present
+        filename: helm-stable
 
-    - name: 9.2. Install Helm
+    - name: 9.3. Install Helm
       apt:
         name: helm
         state: present

@@ -1,0 +1,126 @@
+---
+- name: Deploy K8s Stack (Ingress, Rancher, Storage, KubeVirt) # ansible-playbook -i inventory.ini post_setup.yml --vault-password-file ~/.vault_pass -K
+  hosts: nodes
+  become: yes
+  vars_files:
+    - variables.yml
+    - secrets.yml
+  vars:
+    kubeconfig_path: "/home/{{ ansible_user }}/.kube"
+    rancher_hostname: "rancher.goodwin.website"
+    # Версии (стабильный стек)
+    cert_manager_version: "v1.15.0"
+    rancher_version: "2.9.1"
+    longhorn_version: "1.6.2"
+    kubevirt_version: "v1.3.1"
+    cdi_version: "v1.60.4"
+  environment:
+    # Проверь, что порт 10809 (или твой) открыт на сервере
+    http_proxy: "http://127.0.0.1:10809"
+    https_proxy: "http://127.0.0.1:10809"
+    no_proxy: "localhost,127.0.0.1,192.168.1.72,.svc,.cluster.local"
+
+  tasks:
+    - name: 0. Install Python Kubernetes library
+      apt:
+        name: python3-kubernetes
+        state: present
+
+    - name: 1. Prepare secondary disks (SSD & HDDs)
+      shell: |
+        if ! grep -q "{{ item.path }}" /proc/mounts; then
+          mkfs.ext4 {{ item.dev }} || true
+          mkdir -p {{ item.path }}
+          mount {{ item.dev }} {{ item.path }}
+          echo "{{ item.dev }} {{ item.path }} ext4 defaults 0 0" >> /etc/fstab
+        fi
+      loop:
+        - { dev: "/dev/sdb", path: "/var/lib/longhorn/ssd" }
+        - { dev: "/dev/sda", path: "/var/lib/longhorn/hdd-large" }
+        - { dev: "/dev/sdc", path: "/var/lib/longhorn/hdd-small" }
+
+    - name: 2. Add Helm Repositories
+      kubernetes.core.helm_repository:
+        name: "{{ item.name }}"
+        repo_url: "{{ item.url }}"
+        force_update: yes
+      loop:
+        - { name: "ingress-nginx", url: "https://kubernetes.github.io/ingress-nginx" }
+        - { name: "jetstack", url: "https://charts.jetstack.io" }
+        - { name: "rancher-latest", url: "https://releases.rancher.com/server-charts/stable" }
+        - { name: "longhorn", url: "https://charts.longhorn.io" }
+
+    - name: 3. Install Nginx Ingress Controller
+      kubernetes.core.helm:
+        name: ingress-nginx
+        chart_ref: ingress-nginx/ingress-nginx
+        release_namespace: ingress-nginx
+        create_namespace: yes
+        kubeconfig: "{{ kubeconfig_path }}/config"
+        set_values:
+          # Занимаем порты 80 и 443 напрямую на сетевом интерфейсе сервера
+          - value: "controller.hostNetwork=true"
+          - value: "controller.kind=DaemonSet"
+          - value: "controller.service.type=ClusterIP"
+          - value: "controller.watchIngressWithoutClass=true"
+          # Важно для корректной работы с прокси/роутером
+          - value: "controller.publishService.enabled=false"
+        wait: yes
+
+    - name: 4. Install Cert-Manager
+      kubernetes.core.helm:
+        name: cert-manager
+        chart_ref: jetstack/cert-manager
+        chart_version: "{{ cert_manager_version }}"
+        release_namespace: cert-manager
+        create_namespace: yes
+        kubeconfig: "{{ kubeconfig_path }}/config"
+        set_values:
+          - value: "installCRDs=true"
+        wait: yes
+
+    - name: 5. Install Rancher
+      kubernetes.core.helm:
+        name: rancher
+        chart_ref: rancher-latest/rancher
+        chart_version: "{{ rancher_version }}"
+        release_namespace: cattle-system
+        create_namespace: yes
+        kubeconfig: "{{ kubeconfig_path }}/config"
+        set_values:
+          - value: "hostname={{ rancher_hostname }}"
+          - value: "bootstrapPassword={{ rancher_bootstrap_password }}"
+          - value: "replicas=1"
+        wait: yes
+
+    - name: 6. Install Longhorn
+      kubernetes.core.helm:
+        name: longhorn
+        chart_ref: longhorn/longhorn
+        chart_version: "{{ longhorn_version }}"
+        release_namespace: longhorn-system
+        create_namespace: yes
+        kubeconfig: "{{ kubeconfig_path }}/config"
+        set_values:
+          # Разрешаем Longhorn использовать дополнительные точки монтирования
+          - value: "defaultSettings.createDefaultDiskLabeledNodes=true"
+          - value: "defaultSettings.defaultDataPath=/var/lib/longhorn"
+        wait: yes
+
+    - name: 7. Install KubeVirt (Operator & CR)
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig_path }}/config"
+        src: "{{ item }}"
+      loop:
+        - "https://github.com/kubevirt/kubevirt/releases/download/{{ kubevirt_version }}/kubevirt-operator.yaml"
+        - "https://github.com/kubevirt/kubevirt/releases/download/{{ kubevirt_version }}/kubevirt-cr.yaml"
+
+    - name: 8. Install CDI (Containerized Data Importer for ISOs)
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig_path }}/config"
+        src: "{{ item }}"
+      loop:
+        - "https://github.com/kubevirt/containerized-data-importer/releases/download/{{ cdi_version }}/cdi-operator.yaml"
+        - "https://github.com/kubevirt/containerized-data-importer/releases/download/{{ cdi_version }}/cdi-cr.yaml"
