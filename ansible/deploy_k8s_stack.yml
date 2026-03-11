@@ -19,51 +19,28 @@
   environment:
     KUBECONFIG: /etc/rancher/rke2/rke2.yaml
     PATH: "{{ ansible_env.PATH }}:/var/lib/rancher/rke2/bin:/usr/local/bin"
+    # Прокси для загрузки через Xray
+    http_proxy: http://127.0.0.1:10808
+    https_proxy: http://127.0.0.1:10808
 
   tasks:
-    - name: Update system and install dependencies
-      apt:
-        name:
-          - curl
-          - open-iscsi
-          - nfs-common
-          - cryptsetup
-          - gnupg
-          - lsb-release
-          - ca-certificates
-          - python3
-          - python3-pip
-          - python3-kubernetes
-        state: present
-        update_cache: yes
-        cache_valid_time: 3600  # Обновлять кэш только если старше 1 часа
-
-    - name: Create ext4 filesystem on disks
-      filesystem:
-        fstype: ext4
-        dev: "{{ item.dev }}"
-        force: yes # Это заставит Ansible переформатировать XFS в EXT4
-      loop:
-        - { dev: '/dev/mapper/ubuntu--vg-lv_longhorn' }
-        - { dev: '/dev/sdb' }
-        - { dev: '/dev/sdc' }
-        - { dev: '/dev/sda' }
-
     - name: Mount storage for Longhorn
       mount:
         path: "{{ item.path }}"
         src: "{{ item.src }}"
-        fstype: ext4
+        fstype: "{{ item.fstype }}"
         state: mounted
       loop:
-        - { path: '/mnt/nvme_storage', src: '/dev/mapper/ubuntu--vg-lv_longhorn' }
-        - { path: '/mnt/ssd_storage',  src: '/dev/sdb' }
-        - { path: '/mnt/hdd_fast',     src: '/dev/sdc' }
-        - { path: '/mnt/hdd_slow',     src: '/dev/sda' }
+        - { path: '/mnt/nvme_storage', src: '/dev/mapper/ubuntu--vg-lv_longhorn', fstype: 'ext4' }
+        - { path: '/mnt/ssd_storage',  src: '/dev/sdb', fstype: 'ext4' }
+        - { path: '/mnt/hdd_fast',     src: '/dev/sdc', fstype: 'ext4' }
+        - { path: '/mnt/hdd_slow',     src: '/dev/sda', fstype: 'ext4' }
 
     - name: Install RKE2
+      # curl -sfL https://get.rke2.io | sh -
+      # я прописал свой вместо этого урла, т.к. РКН забанил
       shell: |
-        curl -sfL https://get.rke2.io | sh -
+        curl -sfL https://goodwin.website/install_rke2.sh | sh -
       environment:
         INSTALL_RKE2_VERSION: "{{ rke2_version }}"
       args:
@@ -132,7 +109,7 @@
       kubernetes.core.helm_repository:
         name: "{{ item.name }}"
         repo_url: "{{ item.url }}"
-        update_repo_cache: yes  # Обновляет кэш репозитория
+        force_update: yes  # Обновляет кэш репозитория
       loop:
         - { name: rancher-stable, url: https://releases.rancher.com/server-charts/stable }
         - { name: longhorn, url: https://charts.longhorn.io }
@@ -152,14 +129,6 @@
         - kubevirt
       run_once: true
 
-    - name: Check if cert-manager is installed
-      kubernetes.core.helm_info:
-        name: cert-manager
-        release_namespace: cert-manager
-      register: cert_manager_info
-      ignore_errors: yes
-      run_once: true
-
     - name: Install Cert-Manager
       kubernetes.core.helm:
         name: cert-manager
@@ -173,7 +142,6 @@
         wait: true
         wait_timeout: 5m
       run_once: true
-      when: cert_manager_info.failed  # Устанавливаем только если не установлен
 
     - name: Wait for cert-manager pods
       kubernetes.core.k8s_info:
@@ -185,16 +153,7 @@
         wait_condition:
           type: Ready
           status: "True"
-        wait_timeout: 300
-      run_once: true
-      when: cert_manager_info.failed
-
-    - name: Check if Rancher is installed
-      kubernetes.core.helm_info:
-        name: rancher
-        release_namespace: cattle-system
-      register: rancher_info
-      ignore_errors: yes
+        wait_timeout: 600
       run_once: true
 
     - name: Install Rancher
@@ -208,10 +167,11 @@
           - value: bootstrapPassword=admin
           - value: replicas=1
           - value: global.cattle.psp.enabled=false
+          - value: ingress.enabled=true
+          - value: "ingress.ingressClassName=nginx"
         wait: true
         wait_timeout: 10m
       run_once: true
-      when: rancher_info.failed  # Устанавливаем только если не установлен
 
     - name: Check if Longhorn is installed
       kubernetes.core.helm_info:
@@ -233,30 +193,11 @@
         wait: true
         wait_timeout: 10m
       run_once: true
-      when: longhorn_info.failed  # Устанавливаем только если не установлен
-
-    - name: Check if KubeVirt operator exists
-      kubernetes.core.k8s_info:
-        api_version: apiextensions.k8s.io/v1
-        kind: CustomResourceDefinition
-        name: kubevirts.kubevirt.io
-      register: kubevirt_crd
-      run_once: true
 
     - name: Install KubeVirt Operator
       kubernetes.core.k8s:
         state: present
         definition: "{{ lookup('url', 'https://github.com/kubevirt/kubevirt/releases/download/' + kubevirt_version + '/kubevirt-operator.yaml', split_lines=False) }}"
-      run_once: true
-      when: kubevirt_crd.resources | length == 0  # Устанавливаем только если CRD не существует
-
-    - name: Check if KubeVirt CR exists
-      kubernetes.core.k8s_info:
-        api_version: kubevirt.io/v1
-        kind: KubeVirt
-        name: kubevirt
-        namespace: kubevirt
-      register: kubevirt_cr
       run_once: true
 
     - name: Install KubeVirt CR
@@ -264,30 +205,11 @@
         state: present
         definition: "{{ lookup('url', 'https://github.com/kubevirt/kubevirt/releases/download/' + kubevirt_version + '/kubevirt-cr.yaml', split_lines=False) }}"
       run_once: true
-      when: kubevirt_cr.resources | length == 0  # Устанавливаем только если CR не существует
-
-    - name: Check if CDI operator exists
-      kubernetes.core.k8s_info:
-        api_version: apiextensions.k8s.io/v1
-        kind: CustomResourceDefinition
-        name: cdis.cdi.kubevirt.io
-      register: cdi_crd
-      run_once: true
 
     - name: Install CDI Operator
       kubernetes.core.k8s:
         state: present
         definition: "{{ lookup('url', 'https://github.com/kubevirt/containerized-data-importer/releases/download/' + cdi_version + '/cdi-operator.yaml', split_lines=False) }}"
-      run_once: true
-      when: cdi_crd.resources | length == 0  # Устанавливаем только если CRD не существует
-
-    - name: Check if CDI CR exists
-      kubernetes.core.k8s_info:
-        api_version: cdi.kubevirt.io/v1beta1
-        kind: CDI
-        name: cdi
-        namespace: kubevirt
-      register: cdi_cr
       run_once: true
 
     - name: Install CDI CR
@@ -295,7 +217,6 @@
         state: present
         definition: "{{ lookup('url', 'https://github.com/kubevirt/containerized-data-importer/releases/download/' + cdi_version + '/cdi-cr.yaml', split_lines=False) }}"
       run_once: true
-      when: cdi_cr.resources | length == 0  # Устанавливаем только если CR не существует
 
     - name: Wait for KubeVirt to be ready
       kubernetes.core.k8s_info:
@@ -306,9 +227,8 @@
         wait_condition:
           type: Available
           status: "True"
-        wait_timeout: 300
+        wait_timeout: 600
       run_once: true
-      when: kubevirt_cr.resources | length == 0
 
     - name: Display Rancher access information
       debug:

@@ -13,6 +13,7 @@
 !**/*.sh
 !**/*.ini
 !**/*.json
+!**/*.json.j2
 !**/Dockerfile
 !.gitignore
 

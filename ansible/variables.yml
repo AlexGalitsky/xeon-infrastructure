@@ -1,0 +1,8 @@
+domain: "goodwin.website"
+# Настройки Xray клиента
+xray_server_address: "207.244.199.209"  # ЗАМЕНИТЕ НА ВАШ СЕРВЕР
+xray_server_port: 43882                            # Порт сервера
+xray_method: "2022-blake3-aes-256-gcm"            # Метод шифрования Shadowsocks
+xray_password: "OQ6ebkZq06oMpQXQpne0gCxToUlQIkJmB0yZPxn6IRU=:QtZ0+LcXHY+ViIyVGc8ps0dYsgA+8Pr0pNDSjWKmS3g="
+xray_plugin: "v2ray-plugin"                       # Плагин для WebSocket транспорта
+xray_plugin_opts: "tls;host={{ xray_server_address }};path=/ss"  # Опции плагина

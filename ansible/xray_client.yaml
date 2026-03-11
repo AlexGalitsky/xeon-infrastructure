@@ -1,0 +1,120 @@
+---
+- name: Deploy XRay client, hello rkn
+  hosts: nodes
+  vars_files:
+    - variables.yml
+  become: true
+  vars:
+    # Фиксированные версии для идемпотентности
+    xray_version: "v1.8.24"  # Фиксированная версия Xray
+
+  tasks:
+    # ----- Установка и настройка Xray-core (Shadowsocks клиент) -----
+    - name: Create xray user
+      user:
+        name: xray
+        system: yes
+        shell: /usr/sbin/nologin
+        create_home: no
+        home: /nonexistent
+
+    - name: Create Xray directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: xray
+        group: xray
+        mode: '0755'
+      loop:
+        - /opt/xray
+        - /opt/xray/configs
+        - /var/log/xray
+        - /opt/xray/tools
+
+    - name: Download and install Xray-core
+      unarchive:
+        src: "https://github.com/XTLS/Xray-core/releases/download/{{ xray_version }}/Xray-linux-64.zip"
+        dest: /opt/xray/
+        remote_src: yes
+        owner: xray
+        group: xray
+        mode: '0755'
+        creates: /opt/xray/xray
+      register: xray_download
+
+    - name: Create Xray client configuration for Shadowsocks
+      copy:
+        dest: /opt/xray/configs/config.json
+        owner: xray
+        group: xray
+        mode: '0644'
+        content: |
+          
+
+    - name: Create systemd service for Xray
+      copy:
+        dest: /etc/systemd/system/xray.service
+        content: |
+          [Unit]
+          Description=Xray Service
+          After=network.target nss-lookup.target
+          Wants=network.target
+
+          [Service]
+          Type=simple
+          User=xray
+          Group=xray
+          ExecStart=/opt/xray/xray run -config /opt/xray/configs/config.json
+          ExecReload=/bin/kill -HUP $MAINPID
+          Restart=on-failure
+          RestartSec=10
+          LimitNOFILE=1000000
+          LimitNPROC=1000000
+          NoNewPrivileges=yes
+          PrivateTmp=yes
+          ProtectHome=yes
+          ProtectSystem=full
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Xray
+      systemd:
+        name: xray
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    - name: Wait for Xray to be ready
+      wait_for:
+        port: 10808
+        host: 127.0.0.1
+        timeout: 30
+
+    - name: Configure APT to use proxy
+      copy:
+        dest: /etc/apt/apt.conf.d/01proxy
+        content: |
+          Acquire::http::Proxy "http://127.0.0.1:10809";
+          Acquire::https::Proxy "http://127.0.0.1:10809";
+
+    - name: Configure system-wide proxy
+      copy:
+        dest: /etc/profile.d/proxy.sh
+        content: |
+          export http_proxy="http://127.0.0.1:10809"
+          export https_proxy="http://127.0.0.1:10809"
+          export HTTP_PROXY="http://127.0.0.1:10809"
+          export HTTPS_PROXY="http://127.0.0.1:10809"
+          export no_proxy="localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.local"
+
+    - name: Display Xray Shadowsocks information
+      debug:
+        msg:
+          - "Xray SOCKS5 proxy: 127.0.0.1:10808"
+          - "Xray HTTP proxy: 127.0.0.1:10809"
+          - "Shadowsocks Server: {{ xray_server_address }}:{{ xray_server_port }}"
+          - "Encryption Method: {{ xray_method }}"
+          - "Password: ###################################"
+          - "Plugin: {{ xray_plugin }} with options: {{ xray_plugin_opts }}"
+      run_once: true
