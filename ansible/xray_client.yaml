@@ -88,8 +88,8 @@
       copy:
         dest: /etc/apt/apt.conf.d/01proxy
         content: |
-          Acquire::http::Proxy "socks5h://127.0.0.1:10808";
-          Acquire::https::Proxy "socks5h://127.0.0.1:10808";
+          Acquire::http::Proxy "http://127.0.0.1:10808";
+          Acquire::https::Proxy "http://127.0.0.1:10808";
           # Если прокси недоступен, APT подождет 2 секунды и пойдет напрямую (опционально)
           Acquire::Retries "0";
 
